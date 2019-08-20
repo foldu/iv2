@@ -7,7 +7,7 @@ pub struct Main {
     #[shrinkwrap(main_field)]
     vbox: gtk::Box,
     bottom_bar: BottomBar,
-    image: ScrollableImage,
+    pub image: ScrollableImage,
 }
 
 #[derive(Shrinkwrap)]
@@ -22,7 +22,7 @@ pub struct BottomBar {
 pub struct ScrollableImage {
     #[shrinkwrap(main_field)]
     scroll: gtk::ScrolledWindow,
-    image: gtk::Image,
+    pub image: gtk::Image,
 }
 
 impl BottomBar {

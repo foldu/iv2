@@ -33,5 +33,6 @@ pub struct KeyPress(pub u32);
 
 pub enum Event {
     User(UserEvent),
+    ImageLoaded(gdk_pixbuf::Pixbuf),
     Quit,
 }

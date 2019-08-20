@@ -40,6 +40,7 @@ fn gtk_run() -> Result<(), Error> {
         }
     });
 
+    let tx = main_tx.clone();
     let g_ctx = glib::MainContext::default();
     main_rx.attach(None, move |event| {
         match event {
@@ -47,16 +48,30 @@ fn gtk_run() -> Result<(), Error> {
                 gtk::main_quit();
             }
             Event::User(action) => {
+                use events::UserEvent;
+                log::debug!("Received user action: {:#?}", action);
+                match action {
+                    UserEvent::Quit => {
+                        log::debug!("User quit");
+                        let _ = tx.send(Event::Quit);
+                    }
+                    _ => {}
+                }
                 let file = gio::File::new_for_path("/home/barnabas/meddl_cdu.jpg");
+                let tx = tx.clone();
                 g_ctx.spawn_local(async move {
                     let fh = file
                         .read_async_future(glib::source::PRIORITY_DEFAULT)
                         .await
                         .unwrap();
                     let img = gdk_pixbuf::Pixbuf::new_from_stream_async_future(&fh).await;
-                    println!("{:#?}", img);
+                    if let Ok(img) = img {
+                        let _ = tx.send(Event::ImageLoaded(img));
+                    }
                 });
-                println!("{:#?}", action);
+            }
+            Event::ImageLoaded(img) => {
+                main.image.image.set_from_pixbuf(Some(&img));
             }
         }
         Continue(true)
@@ -97,6 +112,7 @@ enum Error {
 }
 
 fn main() {
+    env_logger::init();
     if let Err(e) = run() {
         eprintln!("{}", e);
         std::process::exit(1);

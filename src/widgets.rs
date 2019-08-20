@@ -68,7 +68,7 @@ impl Main {
 
         let vbox = cascade! {
             gtk::Box::new(gtk::Orientation::Vertical, 0);
-            ..pack_start(image.as_ref(), false, true, 0);
+            ..pack_start(image.as_ref(), true, true, 0);
             ..add(bottom_bar.as_ref());
         };
 

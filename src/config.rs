@@ -49,7 +49,6 @@ impl<'de> Visitor<'de> for KeyPressVisitor {
     }
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<KeyPress, E> {
-        gtk::init();
         let (keycode, _mask) = gtk::accelerator_parse(&value);
         if keycode == 0 {
             Err(E::custom(format!("Can't parse as key: {}", value)))

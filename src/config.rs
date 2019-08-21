@@ -7,36 +7,36 @@ use serde::{
 
 use crate::events::{KeyPress, UserEvent};
 
-const DEFAULT: &str = "
-[keymap]
-plus = 'zoom_in'
-l = 'scroll_right'
-f = 'rotate_upside_down'
-n = 'next'
-p = 'previous'
-o = 'original_size'
-0 = 'scroll_h_start'
-m = 'toggle_status'
-j = 'scroll_down'
-b = 'jump_to_start'
-k = 'scroll_up'
-w = 'resize_to_fit_screen'
-minus = 'zoom_out'
-e = 'jump_to_end'
-r = 'rotate_counter_clockwise'
-g = 'scroll_v_end'
-equal = 'scale_to_fit_current'
-q = 'quit'
-dollar = 'scroll_h_end'
-h = 'scroll_left'
-";
+const DEFAULT: &str = include_str!("../default_config.toml");
 
 #[derive(Deserialize, Debug, Clone, Cfgen)]
+#[serde(rename_all = "kebab-case")]
 #[cfgen(default = "DEFAULT")]
 pub struct Config {
+    pub status_format: String,
+    pub show_scrollbars: bool,
+    // FIXME
+    pub interpolation_algorithm: String,
     // This is read from an user provided config so I'm pretty sure
     // he won't hash ddos himself
     pub keymap: HashMap<KeyPress, UserEvent>,
+}
+
+#[derive(Deserialize, Debug, Clone, Cfgen)]
+#[serde(rename_all = "kebab-case")]
+struct Mode {
+    pub scale_image_to_fit_window: bool,
+    pub hide_status: bool,
+    pub geometry: Geometry,
+}
+
+#[derive(Deserialize, Debug, Clone, Cfgen)]
+#[serde(rename_all = "kebab-case")]
+pub struct Geometry {
+    // FIXME:
+    pub scale: String,
+    // FIXME:
+    pub aspect_ratio: String,
 }
 
 struct KeyPressVisitor;
@@ -45,15 +45,15 @@ impl<'de> Visitor<'de> for KeyPressVisitor {
     type Value = KeyPress;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a key like `Ctrl-a`")
+        formatter.write_str("a key combination like `<Ctrl>a`")
     }
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<KeyPress, E> {
-        let (keycode, _mask) = gtk::accelerator_parse(&value);
+        let (keycode, mask) = gtk::accelerator_parse(&value);
         if keycode == 0 {
             Err(E::custom(format!("Can't parse as key: {}", value)))
         } else {
-            Ok(KeyPress(keycode))
+            Ok(KeyPress(keycode, mask))
         }
     }
 }

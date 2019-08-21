@@ -11,6 +11,7 @@ use futures::{future, prelude::*};
 use gio::prelude::*;
 use glib::prelude::*;
 use gtk::prelude::*;
+use linked_slotlist::{Cursor, DefaultKey, LinkedSlotlist};
 use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
 
@@ -36,7 +37,10 @@ fn gtk_run() -> Result<(), Error> {
     };
     let tx = main_tx.clone();
     window.connect_key_press_event(move |_, key_evt| {
-        if let Some(user_event) = config.keymap.get(&KeyPress(key_evt.get_keyval())) {
+        if let Some(user_event) = config
+            .keymap
+            .get(&KeyPress(key_evt.get_keyval(), key_evt.get_state()))
+        {
             let _ = tx.send(Event::User(*user_event));
             Inhibit(true)
         } else {
@@ -50,15 +54,17 @@ fn gtk_run() -> Result<(), Error> {
         g_ctx,
         event_tx: main_tx,
     };
+    let images: LinkedSlotlist<_> = opt.images.into_iter().collect();
+    let cursor = images.head();
     let mut app = App {
-        index: if opt.images.is_empty() { None } else { Some(0) },
-        state: match opt.images.iter().next() {
-            Some(path) => State::LoadingImage {
-                abort_handle: ctx.load_image(0, path),
+        cursor,
+        state: match cursor {
+            Some(cursor) => State::LoadingImage {
+                abort_handle: ctx.load_image(cursor.id(), images.get(cursor.id()).unwrap()),
             },
             None => State::NoImages,
         },
-        images: opt.images,
+        images,
     };
 
     main_rx.attach(None, move |event| {
@@ -88,14 +94,12 @@ fn gtk_run() -> Result<(), Error> {
                 }
             }
             Event::ImageLoaded { id, img } => {
-                if Some(id) == app.index {
+                if Some(id) == app.cursor.map(|cursor| cursor.id()) {
                     let img_widget = &main.image.image;
                     let alloc = img_widget.get_allocation();
-                    let start = Instant::now();
                     let resized = img
                         .scale_simple(alloc.width, alloc.height, gdk_pixbuf::InterpType::Bilinear)
                         .unwrap();
-                    println!("{:#?}", start.elapsed());
                     img_widget.set_from_pixbuf(Some(&resized));
                     app.state = State::DisplayImage { img };
                 }
@@ -117,7 +121,7 @@ struct AppCtx {
 }
 
 impl AppCtx {
-    fn load_image(&self, id: usize, path: &str) -> future::AbortHandle {
+    fn load_image(&self, id: DefaultKey, path: &str) -> future::AbortHandle {
         let file = gio::File::new_for_path(path);
         let tx = self.event_tx.clone();
         let fut = async move {
@@ -137,42 +141,42 @@ impl AppCtx {
 }
 
 struct App {
-    index: Option<usize>,
-    images: Vec<String>,
+    cursor: Option<Cursor>,
+    images: LinkedSlotlist<String>,
     state: State,
 }
 
 #[derive(Copy, Clone)]
 enum ImageTransition {
-    Next = 1,
-    Prev = -1,
+    Next,
+    Prev,
 }
 
 impl App {
-    fn change_index(&self, transition: ImageTransition) -> Option<usize> {
-        match (transition, self.index) {
-            (ImageTransition::Prev, Some(n)) if n != 0 => Some(n - 1),
-            (ImageTransition::Next, Some(n)) if n + 1 < self.images.len() => Some(n + 1),
+    fn change_index(&self, transition: ImageTransition) -> Option<Cursor> {
+        match (transition, self.cursor) {
+            (ImageTransition::Prev, Some(cur)) => cur.prev_with(&self.images),
+            (ImageTransition::Next, Some(cur)) => cur.next_with(&self.images),
             _ => None,
         }
     }
 
     fn try_load(&mut self, ctx: &AppCtx, transition: ImageTransition) -> bool {
-        if let Some(new_idx) = self.change_index(transition) {
+        if let Some(cur) = self.change_index(transition) {
             self.state = match &self.state {
                 State::NoImages => State::NoImages,
                 State::LoadingImage { abort_handle } => {
                     abort_handle.abort();
                     State::LoadingImage {
                         // FIXME:
-                        abort_handle: ctx.load_image(new_idx, &self.images[new_idx]),
+                        abort_handle: ctx.load_image(cur.id(), self.images.get(cur.id()).unwrap()),
                     }
                 }
                 State::DisplayImage { .. } => State::LoadingImage {
-                    abort_handle: ctx.load_image(new_idx, &self.images[new_idx]),
+                    abort_handle: ctx.load_image(cur.id(), self.images.get(cur.id()).unwrap()),
                 },
             };
-            self.index = Some(new_idx);
+            self.cursor = Some(cur);
             true
         } else {
             false

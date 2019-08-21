@@ -1,0 +1,47 @@
+# available things:
+# int: width, height, index, nimages
+# float: filesize
+# string: filename, fullpath
+status-format = "{width}x{height} | {filename} | {filesize:2b}B | {index}/{nimages}"
+
+show-scrollbars = false
+
+# one of "bilinear", "hyper", TODO
+interpolation-algorithm = "bilinear"
+
+[mode.image]
+scale-to-fit-window = "height"
+hide-status = false
+[mode.image.geometry]
+scale = "75%"
+aspect-ratio = "16x10"
+
+[mode.archive]
+scale-to-fit-window = "width"
+hide-status = true
+[mode.archive.geometry]
+scale = "75%"
+aspect-ratio = "16x10"
+
+[keymap]
+plus = "zoom-in"
+l = "scroll-right"
+f = "rotate-upside-down"
+n = "next"
+p = "previous"
+o = "original-size"
+0 = "scroll-h-start"
+m = "toggle-status"
+j = "scroll-down"
+b = "jump-to-start"
+k = "scroll-up"
+w = "resize-to-fit-screen"
+minus = "zoom-out"
+e = "jump-to-end"
+r = "rotate-counter-clockwise"
+g = "scroll-v-end"
+"<Shift>g" = "scroll-v-end"
+equal = "scale-to-fit-current"
+q = "quit"
+dollar = "scroll-h-end"
+h = "scroll-left"

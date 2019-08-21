@@ -24,3 +24,5 @@ futures-preview = { version = "=0.3.0-alpha.17", features = ["async-await", "nig
 structopt = "0.2.18"
 rand = "0.7.0"
 linked-slotlist = { git = "https://github.com/foldu/linked-slotlist" }
+regex = "1.2.1"
+once_cell = "0.2.6"

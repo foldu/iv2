@@ -1,3 +1,5 @@
+mod deserializers;
+
 use cfgen::prelude::*;
 use hashbrown::HashMap;
 use serde::{
@@ -6,6 +8,7 @@ use serde::{
 };
 
 use crate::events::{KeyPress, UserEvent};
+use deserializers::{percent, ratio};
 
 const DEFAULT: &str = include_str!("../default_config.toml");
 
@@ -17,49 +20,42 @@ pub struct Config {
     pub show_scrollbars: bool,
     // FIXME
     pub interpolation_algorithm: String,
+
+    pub mode: ModeEntry,
+
     // This is read from an user provided config so I'm pretty sure
     // he won't hash ddos himself
     pub keymap: HashMap<KeyPress, UserEvent>,
 }
 
 #[derive(Deserialize, Debug, Clone, Cfgen)]
+struct ModeEntry {
+    image: Mode,
+    archive: Mode,
+}
+
+#[derive(Deserialize, Debug, Clone, Cfgen)]
 #[serde(rename_all = "kebab-case")]
 struct Mode {
-    pub scale_image_to_fit_window: bool,
+    pub scale_to_fit_window: Option<ImageScaling>,
     pub hide_status: bool,
     pub geometry: Geometry,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "kebab-case")]
+enum ImageScaling {
+    Width,
+    Height,
 }
 
 #[derive(Deserialize, Debug, Clone, Cfgen)]
 #[serde(rename_all = "kebab-case")]
 pub struct Geometry {
     // FIXME:
-    pub scale: String,
+    #[serde(deserialize_with = "percent")]
+    pub scale: u8,
     // FIXME:
+    #[serde(deserialize_with = "ratio")]
     pub aspect_ratio: String,
-}
-
-struct KeyPressVisitor;
-
-impl<'de> Visitor<'de> for KeyPressVisitor {
-    type Value = KeyPress;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a key combination like `<Ctrl>a`")
-    }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<KeyPress, E> {
-        let (keycode, mask) = gtk::accelerator_parse(&value);
-        if keycode == 0 {
-            Err(E::custom(format!("Can't parse as key: {}", value)))
-        } else {
-            Ok(KeyPress(keycode, mask))
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for KeyPress {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_str(KeyPressVisitor)
-    }
 }

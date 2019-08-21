@@ -5,6 +5,8 @@ use serde::{
     Deserialize,
 };
 
+use crate::events::KeyPress;
+
 struct KeyPressVisitor;
 
 impl<'de> Visitor<'de> for KeyPressVisitor {
@@ -30,16 +32,34 @@ impl<'de> Deserialize<'de> for KeyPress {
     }
 }
 
+fn parse_percent(s: &str) -> Option<u8> {
+    static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("^(0|(:?[1-9][0-9]*))%$").unwrap());
+    REGEX
+        .captures(s)
+        .and_then(|caps| caps.get(1))
+        .and_then(|s| s.as_str().parse().ok())
+}
+
 pub fn percent<'de, D>(de: D) -> Result<u8, D::Error>
 where
     D: Deserializer<'de>,
 {
-    static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("^(0|(:?[1-9][0-9]*))%$").unwrap());
+    let s = String::deserialize(de)?;
+    parse_percent(&s).ok_or_else(|| serde::de::Error::custom("Can't deserialize as percent value"))
+}
+
+fn parse_ratio(s: &str) -> Option<(u8, u8)> {
+    static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("^([1-9][0-9]*)x([1-9][0-9]*)$").unwrap());
+    REGEX
+        .captures(s)
+        .and_then(|caps| Some((caps.get(1)?, caps.get(2)?)))
+        .and_then(|(w, h)| Some((w.as_str().parse().ok()?, h.as_str().parse().ok()?)))
 }
 
 pub fn ratio<'de, D>(de: D) -> Result<(u8, u8), D::Error>
 where
     D: Deserializer<'de>,
 {
-    static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("^([1-9][0-9]*)x([1-9][0-9]*)$").unwrap());
+    let s = String::deserialize(de)?;
+    parse_ratio(&s).ok_or_else(|| serde::de::Error::custom("Can't deserialize as ratio value"))
 }

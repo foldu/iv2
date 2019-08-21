@@ -2,10 +2,7 @@ mod deserializers;
 
 use cfgen::prelude::*;
 use hashbrown::HashMap;
-use serde::{
-    de::{self, Deserializer, Visitor},
-    Deserialize,
-};
+use serde::Deserialize;
 
 use crate::events::{KeyPress, UserEvent};
 use deserializers::{percent, ratio};
@@ -28,15 +25,15 @@ pub struct Config {
     pub keymap: HashMap<KeyPress, UserEvent>,
 }
 
-#[derive(Deserialize, Debug, Clone, Cfgen)]
-struct ModeEntry {
-    image: Mode,
-    archive: Mode,
+#[derive(Deserialize, Debug, Clone)]
+pub struct ModeEntry {
+    pub image: Mode,
+    pub archive: Mode,
 }
 
-#[derive(Deserialize, Debug, Clone, Cfgen)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
-struct Mode {
+pub struct Mode {
     pub scale_to_fit_window: Option<ImageScaling>,
     pub hide_status: bool,
     pub geometry: Geometry,
@@ -44,7 +41,7 @@ struct Mode {
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
-enum ImageScaling {
+pub enum ImageScaling {
     Width,
     Height,
 }
@@ -57,5 +54,5 @@ pub struct Geometry {
     pub scale: u8,
     // FIXME:
     #[serde(deserialize_with = "ratio")]
-    pub aspect_ratio: String,
+    pub aspect_ratio: (u8, u8),
 }

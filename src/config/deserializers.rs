@@ -1,11 +1,12 @@
-use once_cell::sync::Lazy;
-use regex::Regex;
+use std::fmt;
+
+use gdk_pixbuf::InterpType;
 use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize,
 };
 
-use crate::events::KeyPress;
+use crate::{events::KeyPress, percent::Percent, ratio::Ratio};
 
 struct KeyPressVisitor;
 
@@ -32,34 +33,51 @@ impl<'de> Deserialize<'de> for KeyPress {
     }
 }
 
-fn parse_percent(s: &str) -> Option<u8> {
-    static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("^(0|(:?[1-9][0-9]*))%$").unwrap());
-    REGEX
-        .captures(s)
-        .and_then(|caps| caps.get(1))
-        .and_then(|s| s.as_str().parse().ok())
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case", remote = "InterpType")]
+#[allow(dead_code)]
+pub enum InterpTypeDef {
+    Nearest,
+    Tiles,
+    Bilinear,
+    Hyper,
+    __Unknown(i32),
 }
 
-pub fn percent<'de, D>(de: D) -> Result<u8, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(de)?;
-    parse_percent(&s).ok_or_else(|| serde::de::Error::custom("Can't deserialize as percent value"))
+impl<'de> Deserialize<'de> for Percent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PercentVisitor;
+        impl<'de> de::Visitor<'de> for PercentVisitor {
+            type Value = Percent;
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a percentage")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                value.parse().map_err(|e| E::custom(format!("{}", e)))
+            }
+        }
+
+        deserializer.deserialize_str(PercentVisitor)
+    }
 }
 
-fn parse_ratio(s: &str) -> Option<(u8, u8)> {
-    static REGEX: Lazy<Regex> = Lazy::new(|| Regex::new("^([1-9][0-9]*)x([1-9][0-9]*)$").unwrap());
-    REGEX
-        .captures(s)
-        .and_then(|caps| Some((caps.get(1)?, caps.get(2)?)))
-        .and_then(|(w, h)| Some((w.as_str().parse().ok()?, h.as_str().parse().ok()?)))
-}
+impl<'de> Deserialize<'de> for Ratio {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct RatioVisitor;
+        impl<'de> de::Visitor<'de> for RatioVisitor {
+            type Value = Ratio;
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a ratio")
+            }
 
-pub fn ratio<'de, D>(de: D) -> Result<(u8, u8), D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(de)?;
-    parse_ratio(&s).ok_or_else(|| serde::de::Error::custom("Can't deserialize as ratio value"))
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                value
+                    .parse()
+                    .map_err(|e: &'static str| E::custom(e.to_string()))
+            }
+        }
+
+        deserializer.deserialize_str(RatioVisitor)
+    }
 }

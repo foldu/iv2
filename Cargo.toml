@@ -25,4 +25,6 @@ structopt = "0.2.18"
 rand = "0.7.0"
 linked-slotlist = { git = "https://github.com/foldu/linked-slotlist" }
 regex = "1.2.1"
-once_cell = "0.2.6"
+once_cell = { version = "0.2.6", default_features = false }
+noisy_float = "0.1.11"
+num = "0.2.0"

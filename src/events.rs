@@ -35,7 +35,7 @@ pub struct KeyPress(pub u32, pub gdk::ModifierType);
 pub enum Event {
     User(UserEvent),
     ImageLoaded {
-        img: gdk_pixbuf::Pixbuf,
+        result: Result<gdk_pixbuf::Pixbuf, glib::Error>,
         id: DefaultKey,
     },
     Quit,

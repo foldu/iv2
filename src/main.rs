@@ -1,7 +1,8 @@
-#![feature(async_await)]
-
+#![feature(bind_by_move_pattern_guards)]
 mod config;
 mod events;
+mod percent;
+mod ratio;
 mod state;
 mod widgets;
 
@@ -16,11 +17,11 @@ use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
 
 use crate::events::{Event, KeyPress};
-use std::time::Instant;
 
 fn gtk_run() -> Result<(), Error> {
-    let (_, config) = config::Config::load_or_write_default().context(ReadConfig)?;
+    let (_, config) = config::UserConfig::load_or_write_default().context(ReadConfig)?;
     let opt = Opt::from_args();
+    let (keymap, config) = config.split_for_app_use(config::ViewerMode::Image);
 
     let main = widgets::Main::new();
     let (main_tx, main_rx) = glib::MainContext::channel(glib::source::PRIORITY_HIGH);
@@ -28,19 +29,16 @@ fn gtk_run() -> Result<(), Error> {
     let window = cascade! {
         gtk::Window::new(gtk::WindowType::Toplevel);
         ..add(main.as_ref());
-        ..set_default_size(640, 480);
-        ..set_title("iv");
+        ..set_title("iv - ");
         ..connect_delete_event(move |_, _| {
             let _ = tx.send(Event::Quit);
             Inhibit(false)
         });
     };
+
     let tx = main_tx.clone();
     window.connect_key_press_event(move |_, key_evt| {
-        if let Some(user_event) = config
-            .keymap
-            .get(&KeyPress(key_evt.get_keyval(), key_evt.get_state()))
-        {
+        if let Some(user_event) = keymap.get(&KeyPress(key_evt.get_keyval(), key_evt.get_state())) {
             let _ = tx.send(Event::User(*user_event));
             Inhibit(true)
         } else {
@@ -52,7 +50,7 @@ fn gtk_run() -> Result<(), Error> {
     let g_ctx = glib::MainContext::default();
     let ctx = AppCtx {
         g_ctx,
-        event_tx: main_tx,
+        event_tx: main_tx.clone(),
     };
     let images: LinkedSlotlist<_> = opt.images.into_iter().collect();
     let cursor = images.head();
@@ -66,6 +64,15 @@ fn gtk_run() -> Result<(), Error> {
         },
         images,
     };
+
+    window.show_all();
+    let ratio = ratio::gtk_win_scale(
+        &window.get_window().unwrap(),
+        config.mode.geometry.aspect_ratio,
+        config.mode.geometry.scale,
+    )
+    .unwrap();
+    window.resize(ratio.0, ratio.1);
 
     main_rx.attach(None, move |event| {
         match event {
@@ -93,22 +100,30 @@ fn gtk_run() -> Result<(), Error> {
                     _ => {}
                 }
             }
-            Event::ImageLoaded { id, img } => {
-                if Some(id) == app.cursor.map(|cursor| cursor.id()) {
+            Event::ImageLoaded { id, result } => match result {
+                Ok(img) if Some(id) == app.cursor.map(|cursor| cursor.id()) => {
                     let img_widget = &main.image.image;
                     let alloc = img_widget.get_allocation();
+                    let (_, scaled) = ratio::Ratio::new(img.get_width(), img.get_height())
+                        .unwrap()
+                        .scale(alloc.width, alloc.height)
+                        .unwrap();
                     let resized = img
-                        .scale_simple(alloc.width, alloc.height, gdk_pixbuf::InterpType::Bilinear)
+                        .scale_simple(scaled.0, scaled.1, config.interpolation_algorithm)
                         .unwrap();
                     img_widget.set_from_pixbuf(Some(&resized));
                     app.state = State::DisplayImage { img };
                 }
-            }
+                Err(e) => {
+                    if let Some(path) = app.images.remove(id) {
+                        log::error!("Failed loading image {}: {}", path, e);
+                    }
+                }
+                _ => {}
+            },
         }
         Continue(true)
     });
-
-    window.show_all();
 
     gtk::main();
 
@@ -120,19 +135,20 @@ struct AppCtx {
     event_tx: glib::Sender<Event>,
 }
 
+async fn load_image(path: gio::File) -> Result<gdk_pixbuf::Pixbuf, glib::Error> {
+    let fh = path
+        .read_async_future(glib::source::PRIORITY_DEFAULT)
+        .await?;
+    gdk_pixbuf::Pixbuf::new_from_stream_async_future(&fh).await
+}
+
 impl AppCtx {
     fn load_image(&self, id: DefaultKey, path: &str) -> future::AbortHandle {
         let file = gio::File::new_for_path(path);
         let tx = self.event_tx.clone();
         let fut = async move {
-            let fh = file
-                .read_async_future(glib::source::PRIORITY_DEFAULT)
-                .await
-                .unwrap();
-            let img = gdk_pixbuf::Pixbuf::new_from_stream_async_future(&fh).await;
-            if let Ok(img) = img {
-                let _ = tx.send(Event::ImageLoaded { img, id });
-            }
+            let result = load_image(file).await;
+            let _ = tx.send(Event::ImageLoaded { result, id });
         };
         let (fut, handle) = future::abortable(fut);
         self.g_ctx.spawn_local(fut.map(|_| ()));

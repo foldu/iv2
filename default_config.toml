@@ -9,6 +9,8 @@ show-scrollbars = false
 # one of "bilinear", "hyper", TODO
 interpolation-algorithm = "bilinear"
 
+zoom-step-size = "25%"
+
 [mode.image]
 scale-to-fit-window = "height"
 hide-status = false
@@ -24,7 +26,7 @@ scale = "75%"
 aspect-ratio = "16x10"
 
 [keymap]
-plus = "zoom-in"
+"<Shift>plus" = "zoom-in"
 l = "scroll-right"
 f = "rotate-upside-down"
 n = "next"
@@ -39,9 +41,9 @@ w = "resize-to-fit-screen"
 minus = "zoom-out"
 e = "jump-to-end"
 r = "rotate-counter-clockwise"
-g = "scroll-v-end"
+g = "scroll-v-start"
 "<Shift>g" = "scroll-v-end"
 equal = "scale-to-fit-current"
 q = "quit"
-dollar = "scroll-h-end"
+"<Shift>dollar" = "scroll-h-end"
 h = "scroll-left"

@@ -1,12 +1,16 @@
 use std::fmt;
 
+use euclid::vec2;
 use gdk_pixbuf::InterpType;
 use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize,
 };
 
-use crate::{events::KeyPress, percent::Percent, ratio::Ratio};
+use crate::{
+    config::{Percent, Ratio},
+    events::KeyPress,
+};
 
 struct KeyPressVisitor;
 
@@ -19,6 +23,7 @@ impl<'de> Visitor<'de> for KeyPressVisitor {
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<KeyPress, E> {
         let (keycode, mask) = gtk::accelerator_parse(&value);
+        log::debug!("Deserializing key `{}`: {} {:?}", value, keycode, mask);
         if keycode == 0 {
             Err(E::custom(format!("Can't parse as key: {}", value)))
         } else {
@@ -54,7 +59,15 @@ impl<'de> Deserialize<'de> for Percent {
             }
 
             fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                value.parse().map_err(|e| E::custom(format!("{}", e)))
+                if value.ends_with('%') {
+                    let to_parse = &value[..value.len() - 1];
+                    let ret = to_parse
+                        .parse::<u8>()
+                        .map_err(|e| E::custom(format!("{}", e)))?;
+                    Ok(Percent(ret as f64 / 100.))
+                } else {
+                    Err(E::custom("Percent value must end in `%`"))
+                }
             }
         }
 
@@ -68,13 +81,17 @@ impl<'de> Deserialize<'de> for Ratio {
         impl<'de> de::Visitor<'de> for RatioVisitor {
             type Value = Ratio;
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a ratio")
+                formatter.write_str("a ratio like 16x9")
             }
 
             fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                value
-                    .parse()
-                    .map_err(|e: &'static str| E::custom(e.to_string()))
+                let mut split = value.splitn(2, 'x');
+                let mut next = move || split.next().and_then(|split| split.parse::<u32>().ok());
+                (|| {
+                    let (a, b) = (next()?, next()?);
+                    Some(Ratio(vec2(a as f64, b as f64)))
+                })()
+                .ok_or_else(|| E::custom("Can't parse ratio"))
             }
         }
 

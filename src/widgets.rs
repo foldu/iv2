@@ -1,6 +1,11 @@
+use std::convert::TryFrom;
+
 use cascade::cascade;
+use euclid::{vec2, Vector2D};
 use gtk::prelude::*;
 use shrinkwraprs::Shrinkwrap;
+
+use crate::{events::UserEvent, math::Pixels};
 
 #[derive(Shrinkwrap)]
 pub struct Main {
@@ -60,6 +65,45 @@ impl ScrollableImage {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum Scroll {
+    H(ScrollH),
+    V(ScrollV),
+}
+
+#[derive(Clone, Copy)]
+pub enum ScrollH {
+    Left,
+    Right,
+    Start,
+    End,
+}
+
+#[derive(Clone, Copy)]
+pub enum ScrollV {
+    Down,
+    Up,
+    Start,
+    End,
+}
+
+impl TryFrom<UserEvent> for Scroll {
+    type Error = ();
+    fn try_from(evt: UserEvent) -> Result<Self, Self::Error> {
+        Ok(match evt {
+            UserEvent::ScrollDown => Scroll::V(ScrollV::Down),
+            UserEvent::ScrollUp => Scroll::V(ScrollV::Up),
+            UserEvent::ScrollVStart => Scroll::V(ScrollV::Start),
+            UserEvent::ScrollVEnd => Scroll::V(ScrollV::End),
+            UserEvent::ScrollLeft => Scroll::H(ScrollH::Left),
+            UserEvent::ScrollRight => Scroll::H(ScrollH::Right),
+            UserEvent::ScrollHStart => Scroll::H(ScrollH::Start),
+            UserEvent::ScrollHEnd => Scroll::H(ScrollH::End),
+            _ => return Err(()),
+        })
+    }
+}
+
 impl Main {
     pub fn new() -> Self {
         let bottom_bar = BottomBar::new();
@@ -76,6 +120,43 @@ impl Main {
             image,
             bottom_bar,
             vbox,
+        }
+    }
+
+    pub fn set_image(&self, img: Option<&gdk_pixbuf::Pixbuf>) {
+        self.image.image.set_from_pixbuf(img);
+    }
+
+    pub fn image_allocation(&self) -> Vector2D<i32, Pixels> {
+        let alloc = self.image.image.get_allocation();
+        vec2(alloc.width, alloc.height)
+    }
+
+    pub fn scroll(&self, scroll: Scroll) {
+        use Scroll::*;
+        match scroll {
+            H(scroll) => {
+                if let Some(adjust) = self.image.get_hadjustment() {
+                    use ScrollH::*;
+                    match scroll {
+                        Left => adjust.set_value(adjust.get_value() - adjust.get_step_increment()),
+                        Right => adjust.set_value(adjust.get_value() + adjust.get_step_increment()),
+                        Start => adjust.set_value(adjust.get_lower()),
+                        End => adjust.set_value(adjust.get_upper()),
+                    }
+                }
+            }
+            V(scroll) => {
+                if let Some(adjust) = self.image.get_vadjustment() {
+                    use ScrollV::*;
+                    match scroll {
+                        Up => adjust.set_value(adjust.get_value() - adjust.get_step_increment()),
+                        Down => adjust.set_value(adjust.get_value() + adjust.get_step_increment()),
+                        Start => adjust.set_value(adjust.get_lower()),
+                        End => adjust.set_value(adjust.get_upper()),
+                    }
+                }
+            }
         }
     }
 }

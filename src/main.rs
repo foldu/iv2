@@ -1,27 +1,47 @@
 #![feature(bind_by_move_pattern_guards)]
 mod config;
 mod events;
-mod percent;
-mod ratio;
-mod state;
+mod math;
 mod widgets;
+
+use std::{convert::TryFrom, path::Path};
 
 use cascade::cascade;
 use cfgen::prelude::CfgenDefault;
+use euclid::{vec2, Vector2D};
 use futures::{future, prelude::*};
 use gio::prelude::*;
 use glib::prelude::*;
 use gtk::prelude::*;
-use linked_slotlist::{Cursor, DefaultKey, LinkedSlotlist};
+use linked_slotlist::{DefaultKey, LinkedSlotlist};
 use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
 
 use crate::events::{Event, KeyPress};
+use math::Pixels;
+use widgets::Scroll;
 
 fn gtk_run() -> Result<(), Error> {
     let (_, config) = config::UserConfig::load_or_write_default().context(ReadConfig)?;
     let opt = Opt::from_args();
-    let (keymap, config) = config.split_for_app_use(config::ViewerMode::Image);
+    let mode = {
+        let probably_wants_to_read_archive = opt.images.iter().take(4).all(|file| {
+            // clashes with something in gio so scoped import here
+            use std::os::unix::prelude::*;
+
+            let ext = Path::new(file).extension();
+            ext.map(|ext| ext.as_bytes())
+                .map(|ext| ext == b"cbz" || ext == b"zip")
+                .unwrap_or(false)
+        });
+
+        if probably_wants_to_read_archive {
+            config::ViewerMode::Archive
+        } else {
+            config::ViewerMode::Image
+        }
+    };
+    let (keymap, config) = config.split_for_app_use(mode);
 
     let main = widgets::Main::new();
     let (main_tx, main_rx) = glib::MainContext::channel(glib::source::PRIORITY_HIGH);
@@ -38,7 +58,9 @@ fn gtk_run() -> Result<(), Error> {
 
     let tx = main_tx.clone();
     window.connect_key_press_event(move |_, key_evt| {
-        if let Some(user_event) = keymap.get(&KeyPress(key_evt.get_keyval(), key_evt.get_state())) {
+        let keypress = KeyPress(key_evt.get_keyval(), key_evt.get_state());
+        log::debug!("{:?}", &keypress);
+        if let Some(user_event) = keymap.get(&keypress) {
             let _ = tx.send(Event::User(*user_event));
             Inhibit(true)
         } else {
@@ -58,7 +80,8 @@ fn gtk_run() -> Result<(), Error> {
         cursor,
         state: match cursor {
             Some(cursor) => State::LoadingImage {
-                abort_handle: ctx.load_image(cursor.id(), images.get(cursor.id()).unwrap()),
+                abort_handle: ctx.load_image(cursor, images.get(cursor).unwrap()),
+                last_transition: ImageTransition::Next,
             },
             None => State::NoImages,
         },
@@ -66,13 +89,13 @@ fn gtk_run() -> Result<(), Error> {
     };
 
     window.show_all();
-    let ratio = ratio::gtk_win_scale(
+    let ratio = gtk_win_scale(
         &window.get_window().unwrap(),
-        config.mode.geometry.aspect_ratio,
-        config.mode.geometry.scale,
+        config.mode.geometry.aspect_ratio.0,
+        config.mode.geometry.scale.0,
     )
     .unwrap();
-    window.resize(ratio.0, ratio.1);
+    window.resize(ratio.x, ratio.y);
 
     main_rx.attach(None, move |event| {
         match event {
@@ -89,34 +112,61 @@ fn gtk_run() -> Result<(), Error> {
                     }
                     UserEvent::Next => {
                         if app.try_load(&ctx, ImageTransition::Next) {
-                            main.image.image.set_from_pixbuf(None);
+                            main.set_image(None);
                         }
                     }
                     UserEvent::Previous => {
                         if app.try_load(&ctx, ImageTransition::Prev) {
-                            main.image.image.set_from_pixbuf(None);
+                            main.set_image(None);
                         }
                     }
-                    _ => {}
+                    UserEvent::ZoomIn => {
+                        app.zoom_in(&config, &main);
+                    }
+                    UserEvent::ZoomOut => {
+                        app.zoom_out(&config, &main);
+                    }
+                    other => {
+                        if let Ok(scroll) = Scroll::try_from(other) {
+                            main.scroll(scroll);
+                        } else {
+                            log::debug!("Unhandled user input: {:?}", other);
+                        }
+                    }
                 }
             }
             Event::ImageLoaded { id, result } => match result {
-                Ok(img) if Some(id) == app.cursor.map(|cursor| cursor.id()) => {
-                    let img_widget = &main.image.image;
-                    let alloc = img_widget.get_allocation();
-                    let (_, scaled) = ratio::Ratio::new(img.get_width(), img.get_height())
-                        .unwrap()
-                        .scale(alloc.width, alloc.height)
-                        .unwrap();
+                Ok(img) if app.is_currently_loading_image(id) => {
+                    let alloc = main.image_allocation();
+                    let img_px = vec2(img.get_width(), img.get_height());
+
+                    let (scaled, scale) = math::scale_with_aspect_ratio(alloc, img_px).unwrap();
+
                     let resized = img
-                        .scale_simple(scaled.0, scaled.1, config.interpolation_algorithm)
+                        .scale_simple(scaled.x, scaled.y, config.interpolation_algorithm)
                         .unwrap();
-                    img_widget.set_from_pixbuf(Some(&resized));
-                    app.state = State::DisplayImage { img };
+                    println!("{}", scale);
+                    main.set_image(Some(&resized));
+
+                    app.state = State::DisplayImage { img, scale };
                 }
                 Err(e) => {
+                    if app.is_currently_loading_image(id) {
+                        match app.state {
+                            State::DisplayImage { .. } | State::NoImages => panic!("stop"),
+                            State::LoadingImage {
+                                last_transition, ..
+                            } => {
+                                app.try_load(&ctx, last_transition);
+                            }
+                        };
+                    }
                     if let Some(path) = app.images.remove(id) {
                         log::error!("Failed loading image {}: {}", path, e);
+                        // removed the last image
+                        if app.images.head().is_none() {
+                            app.state = State::NoImages;
+                        }
                     }
                 }
                 _ => {}
@@ -128,6 +178,19 @@ fn gtk_run() -> Result<(), Error> {
     gtk::main();
 
     Ok(())
+}
+
+pub fn gtk_win_scale(
+    win: &gdk::Window,
+    ratio: Vector2D<f64, Pixels>,
+    fact: f64,
+) -> Option<Vector2D<i32, Pixels>> {
+    let disp = gdk::Display::get_default()?;
+    let dims = disp.get_monitor_at_window(win)?.get_geometry();
+    let dims = vec2(dims.width, dims.height).to_f64();
+    let scaled = (dims * fact).floor();
+    println!("{} {}", scaled, dims);
+    math::scale_with_aspect_ratio(scaled, ratio).and_then(|(r, _)| r.try_cast())
 }
 
 struct AppCtx {
@@ -157,7 +220,7 @@ impl AppCtx {
 }
 
 struct App {
-    cursor: Option<Cursor>,
+    cursor: Option<DefaultKey>,
     images: LinkedSlotlist<String>,
     state: State,
 }
@@ -169,27 +232,32 @@ enum ImageTransition {
 }
 
 impl App {
-    fn change_index(&self, transition: ImageTransition) -> Option<Cursor> {
+    fn change_index(&self, transition: ImageTransition) -> Option<DefaultKey> {
         match (transition, self.cursor) {
-            (ImageTransition::Prev, Some(cur)) => cur.prev_with(&self.images),
-            (ImageTransition::Next, Some(cur)) => cur.next_with(&self.images),
+            (ImageTransition::Prev, Some(cur)) => self.images.prev(cur),
+            (ImageTransition::Next, Some(cur)) => self.images.next(cur),
             _ => None,
         }
+    }
+
+    fn is_currently_loading_image(&self, id: DefaultKey) -> bool {
+        Some(id) == self.cursor
     }
 
     fn try_load(&mut self, ctx: &AppCtx, transition: ImageTransition) -> bool {
         if let Some(cur) = self.change_index(transition) {
             self.state = match &self.state {
                 State::NoImages => State::NoImages,
-                State::LoadingImage { abort_handle } => {
+                State::LoadingImage { abort_handle, .. } => {
                     abort_handle.abort();
                     State::LoadingImage {
-                        // FIXME:
-                        abort_handle: ctx.load_image(cur.id(), self.images.get(cur.id()).unwrap()),
+                        abort_handle: ctx.load_image(cur, self.images.get(cur).unwrap()),
+                        last_transition: transition,
                     }
                 }
                 State::DisplayImage { .. } => State::LoadingImage {
-                    abort_handle: ctx.load_image(cur.id(), self.images.get(cur.id()).unwrap()),
+                    abort_handle: ctx.load_image(cur, self.images.get(cur).unwrap()),
+                    last_transition: transition,
                 },
             };
             self.cursor = Some(cur);
@@ -198,12 +266,57 @@ impl App {
             false
         }
     }
+
+    fn zoom_in(&mut self, config: &config::Config, main: &widgets::Main) {
+        if let State::DisplayImage { img, scale } = &self.state {
+            self.state = {
+                let next = math::step_next(*scale, config.zoom_step_size.0);
+                let img_px: euclid::Vector2D<_, math::Pixels> =
+                    vec2(img.get_width(), img.get_height());
+                let scaled = (img_px.to_f64() * next).cast();
+                let resized = img
+                    .scale_simple(scaled.x, scaled.y, config.interpolation_algorithm)
+                    .unwrap();
+                main.set_image(Some(&resized));
+                State::DisplayImage {
+                    img: img.clone(),
+                    scale: next,
+                }
+            };
+        }
+    }
+
+    fn zoom_out(&mut self, config: &config::Config, main: &widgets::Main) {
+        if let State::DisplayImage { img, scale } = &self.state {
+            self.state = {
+                let step_size = config.zoom_step_size.0;
+                let next = f64::max(math::step_prev(*scale, step_size), step_size);
+                let img_px: euclid::Vector2D<_, math::Pixels> =
+                    vec2(img.get_width(), img.get_height());
+                let scaled = (img_px.to_f64() * next).cast();
+                let resized = img
+                    .scale_simple(scaled.x, scaled.y, config.interpolation_algorithm)
+                    .unwrap();
+                main.set_image(Some(&resized));
+                State::DisplayImage {
+                    img: img.clone(),
+                    scale: next,
+                }
+            };
+        }
+    }
 }
 
 enum State {
     NoImages,
-    LoadingImage { abort_handle: future::AbortHandle },
-    DisplayImage { img: gdk_pixbuf::Pixbuf },
+    LoadingImage {
+        abort_handle: future::AbortHandle,
+        last_transition: ImageTransition,
+    },
+    DisplayImage {
+        img: gdk_pixbuf::Pixbuf,
+        scale: f64,
+    },
 }
 
 fn run() -> Result<(), Error> {

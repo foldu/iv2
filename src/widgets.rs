@@ -128,7 +128,7 @@ impl Main {
     }
 
     pub fn image_allocation(&self) -> Vector2D<i32, Pixels> {
-        let alloc = self.image.image.get_allocation();
+        let alloc = self.image.get_allocation();
         vec2(alloc.width, alloc.height)
     }
 

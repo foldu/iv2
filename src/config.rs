@@ -49,7 +49,7 @@ pub struct ModeEntry {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct Mode {
-    pub scale_to_fit_window: Option<ImageScaling>,
+    pub scale_to_fit_window: ImageScaling,
     pub hide_status: bool,
     pub geometry: Geometry,
 }
@@ -59,6 +59,8 @@ pub struct Mode {
 pub enum ImageScaling {
     Width,
     Height,
+    Fit,
+    None,
 }
 
 #[derive(Deserialize, Debug, Clone)]

@@ -12,7 +12,7 @@ interpolation-algorithm = "bilinear"
 zoom-step-size = "25%"
 
 [mode.image]
-scale-to-fit-window = "height"
+scale-to-fit-window = "fit"
 hide-status = false
 [mode.image.geometry]
 scale = "75%"

@@ -10,6 +10,7 @@ use cascade::cascade;
 use cfgen::prelude::CfgenDefault;
 use euclid::{vec2, Vector2D};
 use futures::{future, prelude::*};
+use gdk_pixbuf::Pixbuf;
 use gio::prelude::*;
 use glib::prelude::*;
 use gtk::prelude::*;
@@ -44,7 +45,7 @@ fn gtk_run() -> Result<(), Error> {
     let (keymap, config) = config.split_for_app_use(mode);
 
     let main = widgets::Main::new();
-    let (main_tx, main_rx) = glib::MainContext::channel(glib::source::PRIORITY_HIGH);
+    let (main_tx, main_rx) = glib::MainContext::channel(glib::source::PRIORITY_LOW);
     let tx = main_tx.clone();
     let window = cascade! {
         gtk::Window::new(gtk::WindowType::Toplevel);
@@ -86,13 +87,14 @@ fn gtk_run() -> Result<(), Error> {
             None => State::NoImages,
         },
         images,
+        config,
     };
 
     window.show_all();
     let ratio = gtk_win_scale(
         &window.get_window().unwrap(),
-        config.mode.geometry.aspect_ratio.0,
-        config.mode.geometry.scale.0,
+        app.config.mode.geometry.aspect_ratio.0,
+        app.config.mode.geometry.scale.0,
     )
     .unwrap();
     window.resize(ratio.x, ratio.y);
@@ -111,20 +113,19 @@ fn gtk_run() -> Result<(), Error> {
                         let _ = tx.send(Event::Quit);
                     }
                     UserEvent::Next => {
-                        if app.try_load(&ctx, ImageTransition::Next) {
-                            main.set_image(None);
-                        }
+                        app.try_load(&ctx, &main, ImageTransition::Next);
                     }
                     UserEvent::Previous => {
-                        if app.try_load(&ctx, ImageTransition::Prev) {
-                            main.set_image(None);
-                        }
+                        app.try_load(&ctx, &main, ImageTransition::Prev);
                     }
                     UserEvent::ZoomIn => {
-                        app.zoom_in(&config, &main);
+                        app.zoom_in(&main);
                     }
                     UserEvent::ZoomOut => {
-                        app.zoom_out(&config, &main);
+                        app.zoom_out(&main);
+                    }
+                    UserEvent::ScaleToFitCurrent => {
+                        app.scale_to_fit(&main);
                     }
                     other => {
                         if let Ok(scroll) = Scroll::try_from(other) {
@@ -137,18 +138,8 @@ fn gtk_run() -> Result<(), Error> {
             }
             Event::ImageLoaded { id, result } => match result {
                 Ok(img) if app.is_currently_loading_image(id) => {
-                    let alloc = main.image_allocation();
-                    let img_px = vec2(img.get_width(), img.get_height());
-
-                    let (scaled, scale) = math::scale_with_aspect_ratio(alloc, img_px).unwrap();
-
-                    let resized = img
-                        .scale_simple(scaled.x, scaled.y, config.interpolation_algorithm)
-                        .unwrap();
-                    println!("{}", scale);
-                    main.set_image(Some(&resized));
-
-                    app.state = State::DisplayImage { img, scale };
+                    app.state = State::DisplayImage { img, scale: 100. };
+                    app.scale_to_fit(&main);
                 }
                 Err(e) => {
                     if app.is_currently_loading_image(id) {
@@ -157,7 +148,7 @@ fn gtk_run() -> Result<(), Error> {
                             State::LoadingImage {
                                 last_transition, ..
                             } => {
-                                app.try_load(&ctx, last_transition);
+                                app.try_load(&ctx, &main, last_transition);
                             }
                         };
                     }
@@ -198,11 +189,11 @@ struct AppCtx {
     event_tx: glib::Sender<Event>,
 }
 
-async fn load_image(path: gio::File) -> Result<gdk_pixbuf::Pixbuf, glib::Error> {
+async fn load_image(path: gio::File) -> Result<Pixbuf, glib::Error> {
     let fh = path
         .read_async_future(glib::source::PRIORITY_DEFAULT)
         .await?;
-    gdk_pixbuf::Pixbuf::new_from_stream_async_future(&fh).await
+    Pixbuf::new_from_stream_async_future(&fh).await
 }
 
 impl AppCtx {
@@ -223,9 +214,10 @@ struct App {
     cursor: Option<DefaultKey>,
     images: LinkedSlotlist<String>,
     state: State,
+    config: config::Config,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum ImageTransition {
     Next,
     Prev,
@@ -244,7 +236,7 @@ impl App {
         Some(id) == self.cursor
     }
 
-    fn try_load(&mut self, ctx: &AppCtx, transition: ImageTransition) -> bool {
+    fn try_load(&mut self, ctx: &AppCtx, main: &widgets::Main, transition: ImageTransition) {
         if let Some(cur) = self.change_index(transition) {
             self.state = match &self.state {
                 State::NoImages => State::NoImages,
@@ -261,21 +253,19 @@ impl App {
                 },
             };
             self.cursor = Some(cur);
-            true
-        } else {
-            false
+            main.set_image(None);
         }
     }
 
-    fn zoom_in(&mut self, config: &config::Config, main: &widgets::Main) {
+    fn zoom_in(&mut self, main: &widgets::Main) {
         if let State::DisplayImage { img, scale } = &self.state {
             self.state = {
-                let next = math::step_next(*scale, config.zoom_step_size.0);
+                let next = math::step_next(*scale, self.config.zoom_step_size.0);
                 let img_px: euclid::Vector2D<_, math::Pixels> =
                     vec2(img.get_width(), img.get_height());
                 let scaled = (img_px.to_f64() * next).cast();
                 let resized = img
-                    .scale_simple(scaled.x, scaled.y, config.interpolation_algorithm)
+                    .scale_simple(scaled.x, scaled.y, self.config.interpolation_algorithm)
                     .unwrap();
                 main.set_image(Some(&resized));
                 State::DisplayImage {
@@ -286,16 +276,16 @@ impl App {
         }
     }
 
-    fn zoom_out(&mut self, config: &config::Config, main: &widgets::Main) {
+    fn zoom_out(&mut self, main: &widgets::Main) {
         if let State::DisplayImage { img, scale } = &self.state {
             self.state = {
-                let step_size = config.zoom_step_size.0;
+                let step_size = self.config.zoom_step_size.0;
                 let next = f64::max(math::step_prev(*scale, step_size), step_size);
                 let img_px: euclid::Vector2D<_, math::Pixels> =
                     vec2(img.get_width(), img.get_height());
                 let scaled = (img_px.to_f64() * next).cast();
                 let resized = img
-                    .scale_simple(scaled.x, scaled.y, config.interpolation_algorithm)
+                    .scale_simple(scaled.x, scaled.y, self.config.interpolation_algorithm)
                     .unwrap();
                 main.set_image(Some(&resized));
                 State::DisplayImage {
@@ -305,8 +295,28 @@ impl App {
             };
         }
     }
+
+    fn scale_to_fit(&mut self, main: &widgets::Main) {
+        if let State::DisplayImage { img, .. } = &self.state {
+            let alloc = main.image_allocation();
+            let img_px = vec2(img.get_width(), img.get_height());
+
+            let (scaled, scale) = math::scale_with_aspect_ratio(alloc, img_px).unwrap();
+
+            let resized = img
+                .scale_simple(scaled.x, scaled.y, self.config.interpolation_algorithm)
+                .unwrap();
+
+            main.set_image(Some(&resized));
+            self.state = State::DisplayImage {
+                img: img.clone(),
+                scale,
+            };
+        }
+    }
 }
 
+#[derive(Debug)]
 enum State {
     NoImages,
     LoadingImage {
@@ -314,7 +324,7 @@ enum State {
         last_transition: ImageTransition,
     },
     DisplayImage {
-        img: gdk_pixbuf::Pixbuf,
+        img: Pixbuf,
         scale: f64,
     },
 }

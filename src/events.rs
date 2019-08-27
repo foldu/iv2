@@ -10,7 +10,6 @@ pub enum UserEvent {
     ScaleToFitCurrent,
     OriginalSize,
     ResizeToFitImage,
-    ResizeToFitScreen,
     ZoomOut,
     ZoomIn,
     ScrollDown,
@@ -30,7 +29,7 @@ pub enum UserEvent {
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
-pub struct KeyPress(pub u32, pub gdk::ModifierType);
+pub struct KeyPress(pub u32);
 
 pub enum Event {
     User(UserEvent),

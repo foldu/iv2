@@ -12,21 +12,21 @@ interpolation-algorithm = "bilinear"
 zoom-step-size = "25%"
 
 [mode.image]
-scale-to-fit-window = "fit"
+initial-scaling = "fit"
 hide-status = false
 [mode.image.geometry]
 scale = "75%"
 aspect-ratio = "16x10"
 
 [mode.archive]
-scale-to-fit-window = "width"
+initial-scaling = "fit-to-width"
 hide-status = true
 [mode.archive.geometry]
 scale = "75%"
 aspect-ratio = "16x10"
 
 [keymap]
-"<Shift>plus" = "zoom-in"
+plus = "zoom-in"
 l = "scroll-right"
 f = "rotate-upside-down"
 n = "next"
@@ -37,13 +37,12 @@ m = "toggle-status"
 j = "scroll-down"
 b = "jump-to-start"
 k = "scroll-up"
-w = "resize-to-fit-screen"
 minus = "zoom-out"
 e = "jump-to-end"
 r = "rotate-counter-clockwise"
 g = "scroll-v-start"
-"<Shift>g" = "scroll-v-end"
+G = "scroll-v-end"
 equal = "scale-to-fit-current"
 q = "quit"
-"<Shift>dollar" = "scroll-h-end"
+dollar = "scroll-h-end"
 h = "scroll-left"

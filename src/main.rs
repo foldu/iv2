@@ -45,7 +45,7 @@ fn gtk_run() -> Result<(), Error> {
     let (keymap, config) = config.split_for_app_use(mode);
 
     let main = widgets::Main::new();
-    let (main_tx, main_rx) = glib::MainContext::channel(glib::source::PRIORITY_LOW);
+    let (main_tx, main_rx) = glib::MainContext::channel(glib::source::PRIORITY_DEFAULT);
     let tx = main_tx.clone();
     let window = cascade! {
         gtk::Window::new(gtk::WindowType::Toplevel);
@@ -59,7 +59,7 @@ fn gtk_run() -> Result<(), Error> {
 
     let tx = main_tx.clone();
     window.connect_key_press_event(move |_, key_evt| {
-        let keypress = KeyPress(key_evt.get_keyval(), key_evt.get_state());
+        let keypress = KeyPress(key_evt.get_keyval());
         log::debug!("{:?}", &keypress);
         if let Some(user_event) = keymap.get(&keypress) {
             let _ = tx.send(Event::User(*user_event));
@@ -118,6 +118,12 @@ fn gtk_run() -> Result<(), Error> {
                     UserEvent::Previous => {
                         app.try_load(&ctx, &main, ImageTransition::Prev);
                     }
+                    UserEvent::JumpToStart => {
+                        app.try_load(&ctx, &main, ImageTransition::Start);
+                    }
+                    UserEvent::JumpToEnd => {
+                        app.try_load(&ctx, &main, ImageTransition::End);
+                    }
                     UserEvent::ZoomIn => {
                         app.zoom_in(&main);
                     }
@@ -139,17 +145,24 @@ fn gtk_run() -> Result<(), Error> {
             Event::ImageLoaded { id, result } => match result {
                 Ok(img) if app.is_currently_loading_image(id) => {
                     app.state = State::DisplayImage { img, scale: 100. };
-                    app.scale_to_fit(&main);
+                    app.scale_initial(&main);
                 }
                 Err(e) => {
                     if app.is_currently_loading_image(id) {
                         match app.state {
-                            State::DisplayImage { .. } | State::NoImages => panic!("stop"),
+                            State::DisplayImage { .. } | State::NoImages => {
+                                panic!("how did you even get here?")
+                            }
                             State::LoadingImage {
                                 last_transition, ..
-                            } => {
-                                app.try_load(&ctx, &main, last_transition);
-                            }
+                            } => match last_transition {
+                                ImageTransition::Next | ImageTransition::Start => {
+                                    app.try_load(&ctx, &main, ImageTransition::Next);
+                                }
+                                ImageTransition::Prev | ImageTransition::End => {
+                                    app.try_load(&ctx, &main, ImageTransition::Prev);
+                                }
+                            },
                         };
                     }
                     if let Some(path) = app.images.remove(id) {
@@ -180,8 +193,7 @@ pub fn gtk_win_scale(
     let dims = disp.get_monitor_at_window(win)?.get_geometry();
     let dims = vec2(dims.width, dims.height).to_f64();
     let scaled = (dims * fact).floor();
-    println!("{} {}", scaled, dims);
-    math::scale_with_aspect_ratio(scaled, ratio).and_then(|(r, _)| r.try_cast())
+    math::scale_to_fit(scaled, ratio).and_then(|(r, _)| r.try_cast())
 }
 
 struct AppCtx {
@@ -190,9 +202,7 @@ struct AppCtx {
 }
 
 async fn load_image(path: gio::File) -> Result<Pixbuf, glib::Error> {
-    let fh = path
-        .read_async_future(glib::source::PRIORITY_DEFAULT)
-        .await?;
+    let fh = path.read_async_future(glib::source::PRIORITY_LOW).await?;
     Pixbuf::new_from_stream_async_future(&fh).await
 }
 
@@ -221,6 +231,8 @@ struct App {
 enum ImageTransition {
     Next,
     Prev,
+    Start,
+    End,
 }
 
 impl App {
@@ -228,6 +240,8 @@ impl App {
         match (transition, self.cursor) {
             (ImageTransition::Prev, Some(cur)) => self.images.prev(cur),
             (ImageTransition::Next, Some(cur)) => self.images.next(cur),
+            (ImageTransition::Start, _) => self.images.head(),
+            (ImageTransition::End, _) => self.images.tail(),
             _ => None,
         }
     }
@@ -296,12 +310,15 @@ impl App {
         }
     }
 
-    fn scale_to_fit(&mut self, main: &widgets::Main) {
+    fn scale<F>(&mut self, main: &widgets::Main, f: F)
+    where
+        F: Fn(Vector2D<i32, Pixels>, Vector2D<i32, Pixels>) -> Option<(Vector2D<i32, Pixels>, f64)>,
+    {
         if let State::DisplayImage { img, .. } = &self.state {
             let alloc = main.image_allocation();
             let img_px = vec2(img.get_width(), img.get_height());
 
-            let (scaled, scale) = math::scale_with_aspect_ratio(alloc, img_px).unwrap();
+            let (scaled, scale) = f(alloc, img_px).unwrap();
 
             let resized = img
                 .scale_simple(scaled.x, scaled.y, self.config.interpolation_algorithm)
@@ -313,6 +330,15 @@ impl App {
                 scale,
             };
         }
+    }
+
+    fn scale_initial(&mut self, main: &widgets::Main) {
+        let scaling = self.config.mode.initial_scaling;
+        self.scale(main, |a, b| math::scale(a, b, scaling))
+    }
+
+    fn scale_to_fit(&mut self, main: &widgets::Main) {
+        self.scale(main, math::scale_to_fit)
     }
 }
 

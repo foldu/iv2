@@ -19,7 +19,7 @@ snafu = "0.4.4"
 hashbrown = { version = "0.6.0", features = ["serde"] }
 log = "0.4.8"
 env_logger = { version = "0.6.2", default-features = false }
-futures-preview = { version = "=0.3.0-alpha.17", features = ["async-await", "nightly"] }
+futures-preview = { version = "=0.3.0-alpha.18", features = ["async-await", "nightly"] }
 structopt = "0.2.18"
 rand = "0.7.0"
 euclid = "0.20.1"
@@ -31,3 +31,6 @@ rev = "e4eca3f8732f3f286c7184a3e4306e21065c8562"
 [dependencies.linked-slotlist]
 git = "https://github.com/foldu/linked-slotlist"
 rev = "c0d47f2f1c343b03e88753cf35a7f84c38552f69"
+[dependencies.formatter]
+git = "https://github.com/foldu/formatter"
+rev = "d1b1b02b55526a89e6eaee767e64c1611ff6f1e7"

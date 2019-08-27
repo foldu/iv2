@@ -22,12 +22,12 @@ impl<'de> Visitor<'de> for KeyPressVisitor {
     }
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<KeyPress, E> {
-        let (keycode, mask) = gtk::accelerator_parse(&value);
-        log::debug!("Deserializing key `{}`: {} {:?}", value, keycode, mask);
-        if keycode == 0 {
+        let keyval = gdk::keyval_from_name(&value);
+        log::debug!("Deserializing key `{}`: {}", value, keyval);
+        if keyval == 0 {
             Err(E::custom(format!("Can't parse as key: {}", value)))
         } else {
-            Ok(KeyPress(keycode, mask))
+            Ok(KeyPress(keyval))
         }
     }
 }

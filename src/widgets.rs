@@ -3,31 +3,42 @@ use std::convert::TryFrom;
 use cascade::cascade;
 use euclid::{vec2, Vector2D};
 use gtk::prelude::*;
-use shrinkwraprs::Shrinkwrap;
 
 use crate::{events::UserEvent, math::Pixels};
 
-#[derive(Shrinkwrap)]
 pub struct Main {
-    #[shrinkwrap(main_field)]
     vbox: gtk::Box,
     bottom_bar: BottomBar,
     pub image: ScrollableImage,
 }
 
-#[derive(Shrinkwrap)]
+impl AsRef<gtk::Box> for Main {
+    fn as_ref(&self) -> &gtk::Box {
+        &self.vbox
+    }
+}
+
 pub struct BottomBar {
-    #[shrinkwrap(main_field)]
     hbox: gtk::Box,
     info: gtk::Label,
     err: gtk::Label,
 }
 
-#[derive(Shrinkwrap)]
+impl AsRef<gtk::Box> for BottomBar {
+    fn as_ref(&self) -> &gtk::Box {
+        &self.hbox
+    }
+}
+
 pub struct ScrollableImage {
-    #[shrinkwrap(main_field)]
     scroll: gtk::ScrolledWindow,
     pub image: gtk::Image,
+}
+
+impl AsRef<gtk::ScrolledWindow> for ScrollableImage {
+    fn as_ref(&self) -> &gtk::ScrolledWindow {
+        &self.scroll
+    }
 }
 
 impl BottomBar {
@@ -128,7 +139,7 @@ impl Main {
     }
 
     pub fn image_allocation(&self) -> Vector2D<i32, Pixels> {
-        let alloc = self.image.get_allocation();
+        let alloc = self.image.scroll.get_allocation();
         vec2(alloc.width, alloc.height)
     }
 
@@ -136,7 +147,7 @@ impl Main {
         use Scroll::*;
         match scroll {
             H(scroll) => {
-                if let Some(adjust) = self.image.get_hadjustment() {
+                if let Some(adjust) = self.image.scroll.get_hadjustment() {
                     use ScrollH::*;
                     match scroll {
                         Left => adjust.set_value(adjust.get_value() - adjust.get_step_increment()),
@@ -147,7 +158,7 @@ impl Main {
                 }
             }
             V(scroll) => {
-                if let Some(adjust) = self.image.get_vadjustment() {
+                if let Some(adjust) = self.image.scroll.get_vadjustment() {
                     use ScrollV::*;
                     match scroll {
                         Up => adjust.set_value(adjust.get_value() - adjust.get_step_increment()),

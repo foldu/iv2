@@ -40,7 +40,7 @@ impl AppCtx {
                 (Ok(fh), Ok(Some(info))) => {
                     // FIXME: just hoping the file doesn't vanish is bad
                     // "" means query all standard file attributes
-                    // that's an "interesting" way to use implement flags
+                    // that's an "interesting" way to implement flags
                     let file_meta = fh
                         .query_info_async_future("", glib::PRIORITY_LOW)
                         .await

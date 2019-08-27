@@ -1,5 +1,8 @@
 use linked_slotlist::DefaultKey;
 use serde::Deserialize;
+use snafu::Snafu;
+
+use crate::context::LoadError;
 
 #[derive(Deserialize, Debug, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
@@ -34,8 +37,16 @@ pub struct KeyPress(pub u32);
 pub enum Event {
     User(UserEvent),
     ImageLoaded {
-        result: Result<gdk_pixbuf::Pixbuf, glib::Error>,
+        img: gdk_pixbuf::Pixbuf,
         id: DefaultKey,
+    },
+    ImageMeta {
+        meta: crate::ImageMeta,
+        id: DefaultKey,
+    },
+    LoadFailed {
+        id: DefaultKey,
+        err: LoadError,
     },
     Quit,
 }

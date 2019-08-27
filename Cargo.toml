@@ -12,7 +12,7 @@ gtk = { version = "0.7.0", features = ["v3_22", "futures"] }
 gio = ""
 gdk = ""
 glib = ""
-gdk-pixbuf = { version = "", features = ["futures"] }
+gdk-pixbuf = { version = "", features = ["v2_32", "futures"] }
 cascade = "0.1.3"
 snafu = { version = "0.4.4", default-features = false, features = ["rust_1_30"] }
 hashbrown = { version = "0.6.0", features = ["serde"] }
@@ -23,13 +23,14 @@ structopt = "0.2.18"
 rand = "0.7.0"
 euclid = "0.20.1"
 num-traits = "0.2.8"
+slotmap = "0.4.0"
 
 [dependencies.cfgen]
 git = "https://github.com/foldu/cfgen"
 rev = "e4eca3f8732f3f286c7184a3e4306e21065c8562"
 [dependencies.linked-slotlist]
 git = "https://github.com/foldu/linked-slotlist"
-rev = "c0d47f2f1c343b03e88753cf35a7f84c38552f69"
+rev = "fc58d09e264c7b66bfdf2342ef9f3cf677a47fa4"
 [dependencies.formatter]
 git = "https://github.com/foldu/formatter"
 rev = "d1b1b02b55526a89e6eaee767e64c1611ff6f1e7"

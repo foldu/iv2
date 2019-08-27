@@ -1,5 +1,6 @@
 #![feature(bind_by_move_pattern_guards)]
 mod config;
+mod context;
 mod events;
 mod math;
 mod widgets;
@@ -9,16 +10,20 @@ use std::{convert::TryFrom, path::Path};
 use cascade::cascade;
 use cfgen::prelude::CfgenDefault;
 use euclid::{vec2, Vector2D};
-use futures::{future, prelude::*};
+use formatter::FormatMap;
+use futures::future;
 use gdk_pixbuf::Pixbuf;
-use gio::prelude::*;
 use glib::prelude::*;
 use gtk::prelude::*;
 use linked_slotlist::{DefaultKey, LinkedSlotlist};
+use slotmap::SecondaryMap;
 use snafu::{ResultExt, Snafu};
 use structopt::StructOpt;
 
-use crate::events::{Event, KeyPress};
+use crate::{
+    context::AppCtx,
+    events::{Event, KeyPress},
+};
 use math::Pixels;
 use widgets::Scroll;
 
@@ -42,7 +47,7 @@ fn gtk_run() -> Result<(), Error> {
             config::ViewerMode::Image
         }
     };
-    let (keymap, config) = config.split_for_app_use(mode);
+    let (keymap, config) = config.split_for_app_use(mode).context(Format)?;
 
     let main = widgets::Main::new();
     let (main_tx, main_rx) = glib::MainContext::channel(glib::source::PRIORITY_DEFAULT);
@@ -70,22 +75,23 @@ fn gtk_run() -> Result<(), Error> {
     });
 
     let tx = main_tx.clone();
-    let g_ctx = glib::MainContext::default();
-    let ctx = AppCtx {
-        g_ctx,
-        event_tx: main_tx.clone(),
-    };
+    let ctx = AppCtx::new(tx);
+
     let images: LinkedSlotlist<_> = opt.images.into_iter().collect();
     let cursor = images.head();
     let mut app = App {
         cursor,
+        index: cursor.map(|_| 0),
+        format_map: FormatMap::default(),
         state: match cursor {
             Some(cursor) => State::LoadingImage {
-                abort_handle: ctx.load_image(cursor, images.get(cursor).unwrap()),
+                abort_handle: ctx.load_image(cursor, images.get(cursor).unwrap().to_owned()),
                 last_transition: ImageTransition::Next,
             },
             None => State::NoImages,
         },
+        images_meta: SecondaryMap::with_capacity(images.len()),
+        filenames: SecondaryMap::with_capacity(images.len()),
         images,
         config,
     };
@@ -99,6 +105,7 @@ fn gtk_run() -> Result<(), Error> {
     .unwrap();
     window.resize(ratio.x, ratio.y);
 
+    let tx = main_tx.clone();
     main_rx.attach(None, move |event| {
         match event {
             Event::Quit => {
@@ -142,39 +149,44 @@ fn gtk_run() -> Result<(), Error> {
                     }
                 }
             }
-            Event::ImageLoaded { id, result } => match result {
-                Ok(img) if app.is_currently_loading_image(id) => {
+
+            Event::ImageMeta { meta, id } => {
+                app.images_meta.insert(id, meta);
+            }
+
+            Event::LoadFailed { id, err } => {
+                if app.is_currently_loading_image(id) {
+                    match app.state {
+                        State::DisplayImage { .. } | State::NoImages => {
+                            panic!("how did you even get here?")
+                        }
+                        State::LoadingImage {
+                            last_transition, ..
+                        } => match last_transition {
+                            ImageTransition::Next | ImageTransition::Start => {
+                                app.try_load(&ctx, &main, ImageTransition::Next);
+                            }
+                            ImageTransition::Prev | ImageTransition::End => {
+                                app.try_load(&ctx, &main, ImageTransition::Prev);
+                            }
+                        },
+                    };
+                }
+                if let (Some(path), _) = (app.images.remove(id), app.images_meta.remove(id)) {
+                    log::error!("Failed loading image {}: {}", path, err);
+                    // removed the last image
+                    if app.images.head().is_none() {
+                        app.state = State::NoImages;
+                    }
+                }
+            }
+
+            Event::ImageLoaded { id, img } => {
+                if app.is_currently_loading_image(id) {
                     app.state = State::DisplayImage { img, scale: 100. };
                     app.scale_initial(&main);
                 }
-                Err(e) => {
-                    if app.is_currently_loading_image(id) {
-                        match app.state {
-                            State::DisplayImage { .. } | State::NoImages => {
-                                panic!("how did you even get here?")
-                            }
-                            State::LoadingImage {
-                                last_transition, ..
-                            } => match last_transition {
-                                ImageTransition::Next | ImageTransition::Start => {
-                                    app.try_load(&ctx, &main, ImageTransition::Next);
-                                }
-                                ImageTransition::Prev | ImageTransition::End => {
-                                    app.try_load(&ctx, &main, ImageTransition::Prev);
-                                }
-                            },
-                        };
-                    }
-                    if let Some(path) = app.images.remove(id) {
-                        log::error!("Failed loading image {}: {}", path, e);
-                        // removed the last image
-                        if app.images.head().is_none() {
-                            app.state = State::NoImages;
-                        }
-                    }
-                }
-                _ => {}
-            },
+            }
         }
         Continue(true)
     });
@@ -196,35 +208,20 @@ pub fn gtk_win_scale(
     math::scale_to_fit(scaled, ratio).and_then(|(r, _)| r.try_cast())
 }
 
-struct AppCtx {
-    g_ctx: glib::MainContext,
-    event_tx: glib::Sender<Event>,
-}
-
-async fn load_image(path: gio::File) -> Result<Pixbuf, glib::Error> {
-    let fh = path.read_async_future(glib::source::PRIORITY_LOW).await?;
-    Pixbuf::new_from_stream_async_future(&fh).await
-}
-
-impl AppCtx {
-    fn load_image(&self, id: DefaultKey, path: &str) -> future::AbortHandle {
-        let file = gio::File::new_for_path(path);
-        let tx = self.event_tx.clone();
-        let fut = async move {
-            let result = load_image(file).await;
-            let _ = tx.send(Event::ImageLoaded { result, id });
-        };
-        let (fut, handle) = future::abortable(fut);
-        self.g_ctx.spawn_local(fut.map(|_| ()));
-        handle
-    }
-}
-
 struct App {
     cursor: Option<DefaultKey>,
+    index: Option<usize>,
     images: LinkedSlotlist<String>,
+    images_meta: SecondaryMap<DefaultKey, ImageMeta>,
+    filenames: SecondaryMap<DefaultKey, String>,
     state: State,
     config: config::Config,
+    format_map: FormatMap,
+}
+
+struct ImageMeta {
+    dimensions: Vector2D<i32, Pixels>,
+    filesize: i64,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -246,23 +243,40 @@ impl App {
         }
     }
 
+    fn update_formatmap(&mut self) {
+        // FIXME: actually update the rest
+        if let Some(idx) = self.index {
+            self.format_map.insert("index", idx as f64);
+        }
+    }
+
     fn is_currently_loading_image(&self, id: DefaultKey) -> bool {
         Some(id) == self.cursor
     }
 
-    fn try_load(&mut self, ctx: &AppCtx, main: &widgets::Main, transition: ImageTransition) {
+    fn try_load(
+        &mut self,
+        ctx: &context::AppCtx,
+        main: &widgets::Main,
+        transition: ImageTransition,
+    ) {
         if let Some(cur) = self.change_index(transition) {
+            let path = self.images.get(cur).unwrap().to_owned();
+            if let None = self.filenames.get(cur) {
+                let filename = Path::new(&path).file_name().unwrap().to_str().unwrap();
+                self.filenames.insert(cur, filename.to_owned());
+            }
             self.state = match &self.state {
                 State::NoImages => State::NoImages,
                 State::LoadingImage { abort_handle, .. } => {
                     abort_handle.abort();
                     State::LoadingImage {
-                        abort_handle: ctx.load_image(cur, self.images.get(cur).unwrap()),
+                        abort_handle: ctx.load_image(cur, path),
                         last_transition: transition,
                     }
                 }
                 State::DisplayImage { .. } => State::LoadingImage {
-                    abort_handle: ctx.load_image(cur, self.images.get(cur).unwrap()),
+                    abort_handle: ctx.load_image(cur, path),
                     last_transition: transition,
                 },
             };
@@ -385,6 +399,9 @@ enum Error {
 
     #[snafu(display("Can't read config: {}", source))]
     ReadConfig { source: cfgen::Error },
+
+    #[snafu(display("Bad status_format in config: {}", source))]
+    Format { source: formatter::Error },
 }
 
 fn main() {

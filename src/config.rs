@@ -2,6 +2,7 @@ mod deserializers;
 
 use cfgen::prelude::*;
 use euclid::Vector2D;
+use formatter::FormatString;
 use hashbrown::HashMap;
 use serde::Deserialize;
 
@@ -30,9 +31,8 @@ pub struct UserConfig {
     pub keymap: HashMap<KeyPress, UserEvent>,
 }
 
-#[derive(Debug, Clone)]
 pub struct Config {
-    pub status_format: String,
+    pub status_format: FormatString,
     pub show_scrollbars: bool,
     pub interpolation_algorithm: gdk_pixbuf::InterpType,
     pub zoom_step_size: Percent,
@@ -81,12 +81,21 @@ pub struct Ratio(pub Vector2D<f64, Pixels>);
 #[derive(Clone, Copy, Debug)]
 pub struct Percent(pub f64);
 
+const FORMAT_KEYS: &[&str] = &[
+    "width", "height", "filename", "fullpath", "filesize", "index", "nimages",
+];
+
 impl UserConfig {
-    pub fn split_for_app_use(self, mode: ViewerMode) -> (HashMap<KeyPress, UserEvent>, Config) {
-        (
+    pub fn split_for_app_use(
+        self,
+        mode: ViewerMode,
+    ) -> Result<(HashMap<KeyPress, UserEvent>, Config), formatter::Error> {
+        let status_format =
+            FormatString::parse_with_allowed_keys(&self.status_format, FORMAT_KEYS)?;
+        Ok((
             self.keymap,
             Config {
-                status_format: self.status_format,
+                status_format,
                 show_scrollbars: self.show_scrollbars,
                 zoom_step_size: self.zoom_step_size,
                 interpolation_algorithm: self.interpolation_algorithm,
@@ -95,6 +104,6 @@ impl UserConfig {
                     ViewerMode::Archive => self.mode.archive,
                 },
             },
-        )
+        ))
     }
 }

@@ -21,7 +21,7 @@ impl AsRef<gtk::Box> for Main {
 pub struct BottomBar {
     hbox: gtk::Box,
     info: gtk::Label,
-    err: gtk::Label,
+    _err: gtk::Label,
 }
 
 impl AsRef<gtk::Box> for BottomBar {
@@ -47,17 +47,19 @@ impl BottomBar {
             gtk::Label::new(None);
         };
 
-        let err = cascade! {
+        let _err = cascade! {
             gtk::Label::new(None);
         };
 
         let hbox = cascade! {
             gtk::Box::new(gtk::Orientation::Horizontal, 10);
-            ..add(&err);
-            ..add(&info);
+            ..pack_start(&_err, false, false, 0);
+            ..pack_end(&info, true, true, 0);
+            ..set_valign(gtk::Align::End);
+            ..set_halign(gtk::Align::End);
         };
 
-        Self { hbox, info, err }
+        Self { hbox, info, _err }
     }
 }
 

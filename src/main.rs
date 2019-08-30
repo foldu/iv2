@@ -173,8 +173,6 @@ fn gtk_run() -> Result<(), Error> {
             }
 
             Event::LoadFailed { id, err } => {
-                // FIXME: when rapidly going through images this seems to break
-                app.index = app.index.map(|index| index - 1);
                 if app.is_currently_loading_image(id) {
                     match app.state {
                         State::DisplayImage { .. } | State::NoImages => {
@@ -192,7 +190,13 @@ fn gtk_run() -> Result<(), Error> {
                         },
                     };
                 }
-                if let (Some(path), _) = (app.images.remove(id), app.images_meta.remove(id)) {
+                if let (Some(path), _, _) = (
+                    app.images.remove(id),
+                    app.images_meta.remove(id),
+                    app.filenames.remove(id),
+                ) {
+                    // FIXME: when rapidly going through images this seems to break
+                    app.index = app.index.map(|index| index - 1);
                     log::error!("Failed loading image {}: {}", path, err);
                     // removed the last image
                     if app.images.head().is_none() {

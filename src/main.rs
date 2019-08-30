@@ -167,11 +167,13 @@ fn gtk_run() -> Result<(), Error> {
             }
 
             Event::ImageMeta { meta, id } => {
+                log::debug!("Got meta for {:#?}: {:#?}", id, meta);
                 app.images_meta.insert(id, meta);
                 app.update_info(&main);
             }
 
             Event::LoadFailed { id, err } => {
+                // FIXME: when rapidly going through images this seems to break
                 app.index = app.index.map(|index| index - 1);
                 if app.is_currently_loading_image(id) {
                     match app.state {
@@ -242,6 +244,7 @@ struct App {
     format_map: FormatMap,
 }
 
+#[derive(Debug)]
 pub struct ImageMeta {
     dimensions: Vector2D<i32, Pixels>,
     filesize: i64,

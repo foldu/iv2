@@ -38,11 +38,9 @@ impl AppCtx {
 
             let to_send = match (fh.context(FromGlib), pixbuf_info.context(FromGlib)) {
                 (Ok(fh), Ok(Some(info))) => {
-                    // FIXME: just hoping the file doesn't vanish is bad
-                    // "" means query all standard file attributes
-                    // that's an "interesting" way to implement flags
+                    // FIXME: just hoping this works is bad
                     let file_meta = fh
-                        .query_info_async_future("", glib::PRIORITY_LOW)
+                        .query_info_async_future("standard::size", glib::PRIORITY_LOW)
                         .await
                         .unwrap();
                     let _ = tx.send(Event::ImageMeta {

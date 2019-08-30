@@ -24,8 +24,8 @@ use crate::{
     context::AppCtx,
     events::{Event, KeyPress},
 };
+use math::Pixels;
 use widgets::Scroll;
-use Pixels;
 
 fn gtk_run() -> Result<(), Error> {
     let (_, config) = config::UserConfig::load_or_write_default().context(ReadConfig)?;

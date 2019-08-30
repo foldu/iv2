@@ -2,7 +2,7 @@
 # int: width, height, index, nimages
 # float: filesize
 # string: filename, fullpath
-status-format = "{width}x{height} | {filename} | {filesize:B.2}B | {index}/{nimages}"
+status-format = "{width}x{height} | {filename} | {filesize:B.2}B | {index:.0}/{nimages:.0}"
 
 show-scrollbars = false
 

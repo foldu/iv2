@@ -170,4 +170,7 @@ impl Main {
             }
         }
     }
+    pub fn set_info(&self, text: &str) {
+        self.bottom_bar.info.set_text(text);
+    }
 }

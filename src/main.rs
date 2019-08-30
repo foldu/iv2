@@ -24,8 +24,8 @@ use crate::{
     context::AppCtx,
     events::{Event, KeyPress},
 };
-use math::Pixels;
 use widgets::Scroll;
+use Pixels;
 
 fn gtk_run() -> Result<(), Error> {
     let (_, config) = config::UserConfig::load_or_write_default().context(ReadConfig)?;
@@ -94,7 +94,7 @@ fn gtk_run() -> Result<(), Error> {
     let mut app = App {
         cursor,
         index: cursor.map(|_| 0),
-        format_map: FormatMap::default(),
+        format_map: default_format_map(),
         state: match cursor {
             Some(cursor) => State::LoadingImage {
                 abort_handle: ctx.load_image(cursor, images.get(cursor).unwrap().to_owned()),
@@ -168,9 +168,11 @@ fn gtk_run() -> Result<(), Error> {
 
             Event::ImageMeta { meta, id } => {
                 app.images_meta.insert(id, meta);
+                app.update_info(&main);
             }
 
             Event::LoadFailed { id, err } => {
+                app.index = app.index.map(|index| index - 1);
                 if app.is_currently_loading_image(id) {
                     match app.state {
                         State::DisplayImage { .. } | State::NoImages => {
@@ -254,7 +256,7 @@ enum ImageTransition {
 }
 
 impl App {
-    fn change_index(&self, transition: ImageTransition) -> Option<DefaultKey> {
+    fn try_transition(&self, transition: ImageTransition) -> Option<DefaultKey> {
         match (transition, self.cursor) {
             (ImageTransition::Prev, Some(cur)) => self.images.prev(cur),
             (ImageTransition::Next, Some(cur)) => self.images.next(cur),
@@ -264,10 +266,47 @@ impl App {
         }
     }
 
-    fn update_formatmap(&mut self) {
-        // FIXME: actually update the rest
+    fn change_index(&mut self, transition: ImageTransition) -> Option<DefaultKey> {
+        let ret = self.try_transition(transition);
+        self.index = match (transition, ret) {
+            (ImageTransition::Prev, Some(_)) => self.index.map(|idx| idx - 1),
+            (ImageTransition::Next, Some(_)) => self.index.map(|idx| idx + 1),
+            (ImageTransition::Start, Some(_)) => Some(0),
+            (ImageTransition::End, Some(_)) => Some(self.images.len()),
+            _ => self.index,
+        };
+        ret
+    }
+
+    fn update_info(&mut self, main: &widgets::Main) {
         if let Some(idx) = self.index {
-            self.format_map.insert("index", idx as f64);
+            self.format_map.insert("index", (idx + 1) as f64);
+        }
+
+        self.format_map.insert("nimages", self.images.len() as f64);
+        if let Some(cur) = self.cursor {
+            if let Some(meta) = self.images_meta.get(cur) {
+                self.format_map.insert("width", meta.dimensions.x as f64);
+                self.format_map.insert("height", meta.dimensions.x as f64);
+                self.format_map.insert("filesize", meta.filesize as f64);
+            }
+
+            if let Some(filename) = self.filenames.get(cur) {
+                self.format_map.insert("filename", filename.clone());
+            }
+
+            if let Some(path) = self.images.get(cur) {
+                self.format_map.insert("fullpath", path.to_owned());
+            }
+        }
+
+        match self.config.status_format.fmt(&self.format_map) {
+            Ok(fmt) => {
+                main.set_info(&format!("{}", fmt));
+            }
+            Err(e) => {
+                log::error!("Can't format: {}", e);
+            }
         }
     }
 
@@ -287,6 +326,7 @@ impl App {
                 let filename = Path::new(&path).file_name().unwrap().to_str().unwrap();
                 self.filenames.insert(cur, filename.to_owned());
             }
+            self.update_info(&main);
             self.state = match &self.state {
                 State::NoImages => State::NoImages,
                 State::LoadingImage { abort_handle, .. } => {
@@ -310,8 +350,7 @@ impl App {
         if let State::DisplayImage { img, scale } = &self.state {
             self.state = {
                 let next = math::step_next(*scale, self.config.zoom_step_size.0);
-                let img_px: euclid::Vector2D<_, math::Pixels> =
-                    vec2(img.get_width(), img.get_height());
+                let img_px: euclid::Vector2D<_, Pixels> = vec2(img.get_width(), img.get_height());
                 let scaled = (img_px.to_f64() * next).cast();
                 let resized = img
                     .scale_simple(scaled.x, scaled.y, self.config.interpolation_algorithm)
@@ -396,6 +435,17 @@ enum State {
         img: Pixbuf,
         scale: f64,
     },
+}
+
+fn default_format_map() -> FormatMap {
+    let mut ret = FormatMap::new();
+    ret.insert("index", -1.0);
+    ret.insert("nimages", -1.0);
+    ret.insert("width", -1.0);
+    ret.insert("height", -1.0);
+    ret.insert("filesize", -1.0);
+    ret.insert("filename", "".to_string());
+    ret
 }
 
 fn run() -> Result<(), Error> {

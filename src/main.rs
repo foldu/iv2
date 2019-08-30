@@ -75,6 +75,18 @@ fn gtk_run() -> Result<(), Error> {
     });
 
     let tx = main_tx.clone();
+    window.connect_window_state_event(move |_, evt| {
+        if evt
+            .get_changed_mask()
+            .contains(gdk::WindowState::FULLSCREEN)
+        {
+            let _ = tx.send(Event::WindowFullScreenToggle);
+        }
+
+        Inhibit(false)
+    });
+
+    let tx = main_tx.clone();
     let ctx = AppCtx::new(tx);
 
     let images: LinkedSlotlist<_> = opt.images.into_iter().collect();
@@ -94,6 +106,7 @@ fn gtk_run() -> Result<(), Error> {
         filenames: SecondaryMap::with_capacity(images.len()),
         images,
         config,
+        is_fullscreen: false,
     };
 
     window.show_all();
@@ -139,6 +152,9 @@ fn gtk_run() -> Result<(), Error> {
                     }
                     UserEvent::ScaleToFitCurrent => {
                         app.scale_to_fit(&main);
+                    }
+                    UserEvent::ToggleFullscreen => {
+                        app.toggle_fullscreen(&window);
                     }
                     other => {
                         if let Ok(scroll) = Scroll::try_from(other) {
@@ -187,6 +203,10 @@ fn gtk_run() -> Result<(), Error> {
                     app.scale_initial(&main);
                 }
             }
+            // FIXME: this doesn't work for some reason
+            Event::WindowFullScreenToggle => {
+                app.scale_initial(&main);
+            }
         }
         Continue(true)
     });
@@ -210,6 +230,7 @@ pub fn gtk_win_scale(
 
 struct App {
     cursor: Option<DefaultKey>,
+    is_fullscreen: bool,
     index: Option<usize>,
     images: LinkedSlotlist<String>,
     images_meta: SecondaryMap<DefaultKey, ImageMeta>,
@@ -219,7 +240,7 @@ struct App {
     format_map: FormatMap,
 }
 
-struct ImageMeta {
+pub struct ImageMeta {
     dimensions: Vector2D<i32, Pixels>,
     filesize: i64,
 }
@@ -309,8 +330,7 @@ impl App {
             self.state = {
                 let step_size = self.config.zoom_step_size.0;
                 let next = f64::max(math::step_prev(*scale, step_size), step_size);
-                let img_px: euclid::Vector2D<_, math::Pixels> =
-                    vec2(img.get_width(), img.get_height());
+                let img_px: euclid::Vector2D<_, Pixels> = vec2(img.get_width(), img.get_height());
                 let scaled = (img_px.to_f64() * next).cast();
                 let resized = img
                     .scale_simple(scaled.x, scaled.y, self.config.interpolation_algorithm)
@@ -353,6 +373,15 @@ impl App {
 
     fn scale_to_fit(&mut self, main: &widgets::Main) {
         self.scale(main, math::scale_to_fit)
+    }
+
+    fn toggle_fullscreen(&mut self, window: &gtk::Window) {
+        let is_fullscreen = self.is_fullscreen;
+        if std::mem::replace(&mut self.is_fullscreen, !is_fullscreen) {
+            window.unfullscreen();
+        } else {
+            window.fullscreen();
+        }
     }
 }
 

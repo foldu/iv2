@@ -1,6 +1,5 @@
 use linked_slotlist::DefaultKey;
 use serde::Deserialize;
-use snafu::Snafu;
 
 use crate::context::LoadError;
 
@@ -29,6 +28,7 @@ pub enum UserEvent {
     RotateClockwise,
     RotateCounterClockwise,
     RotateUpsideDown,
+    ToggleFullscreen,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
@@ -49,4 +49,5 @@ pub enum Event {
         err: LoadError,
     },
     Quit,
+    WindowFullScreenToggle,
 }

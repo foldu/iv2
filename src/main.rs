@@ -279,7 +279,7 @@ impl App {
             (ImageTransition::Prev, Some(_)) => self.index.map(|idx| idx - 1),
             (ImageTransition::Next, Some(_)) => self.index.map(|idx| idx + 1),
             (ImageTransition::Start, Some(_)) => Some(0),
-            (ImageTransition::End, Some(_)) => Some(self.images.len()),
+            (ImageTransition::End, Some(_)) => Some(self.images.len() - 1),
             _ => self.index,
         };
         ret

@@ -13,7 +13,7 @@ gio = ""
 gdk = ""
 glib = ""
 gdk-pixbuf = { version = "", features = ["v2_32", "futures"] }
-cascade = "0.1.3"
+cascade = "0.1.4"
 snafu = { version = "0.5.0", default-features = false, features = ["rust_1_30"] }
 hashbrown = { version = "0.6.0", features = ["serde"] }
 log = "0.4.8"

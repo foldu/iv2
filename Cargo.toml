@@ -22,7 +22,7 @@ futures-preview = { version = "=0.3.0-alpha.18", features = ["async-await", "nig
 structopt = "0.3.2"
 rand = "0.7.2"
 euclid = "0.20.1"
-num-traits = "0.2.8"
+num-traits = "0.2.11"
 slotmap = "0.4.0"
 
 [dependencies.cfgen]
